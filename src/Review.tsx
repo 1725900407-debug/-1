@@ -1,0 +1,29 @@
+import { useState } from 'react';
+import { ArrowRight, EyeOff, Plus, Save, Trash2 } from 'lucide-react';
+import { useApp } from './context';
+import { parseChat } from './storage';
+import type { Message, Recap, Mode } from '../shared/types';
+import { recapSchema } from '../shared/types';
+import { request } from './api';
+import { Notice, PageTitle, RecapView } from './components';
+export default function Review(){
+  const {store,setStore,notify}=useApp();const [raw,setRaw]=useState('');const [lines,setLines]=useState<Message[]>([]);const [unmarked,setUnmarked]=useState(false);const [marked,setMarked]=useState(false);const [consent,setConsent]=useState(false);const [saveAllowed,setSaveAllowed]=useState(false);const [saved,setSaved]=useState(false);const [recap,setRecap]=useState<Recap>();const [resultMode,setResultMode]=useState<Mode>('demo');const [busy,setBusy]=useState(false);const [error,setError]=useState('');
+  const parse=()=>{setError('');if(!raw.trim()){setError('请先粘贴聊天文本，或选择手动添加。');return;}if(raw.length>20000){setError('聊天文本最多 20000 字，请选择需要复盘的一段。');return;}const result=parseChat(raw);if(result.messages.length>100){setError('最多 100 条消息，请选择其中一段。');return;}setLines(result.messages);setUnmarked(result.unmarked);setMarked(!result.unmarked);setRecap(undefined);setSaved(false);};
+  const analyze=async()=>{
+    if(!lines.length){setError('请先解析文本，或手动添加消息。');return;}
+    if(!marked){setError('有消息的角色未识别，请逐条确认“我 / 对方”，然后勾选已确认。');return;}
+    if(lines.some(l=>!l.text.trim()||l.text.length>4000)||lines.reduce((n,l)=>n+l.text.length,0)>20000){setError('每条消息须为 1–4000 字，总计最多 20000 字。');return;}
+    if(!lines.some(l=>l.role==='me')||!lines.some(l=>l.role==='other')){setError('至少需要一条“我”和一条“对方”的消息。');return;}
+    if(store.settings.mode==='ai'&&!consent){setError('提交前请确认这段匿名文本会发送到外部 AI 服务。');return;}
+    setBusy(true);setError('');
+    try{const result=await request('recap',{mode:store.settings.mode,kind:'review',messages:lines,consent},recapSchema);setRecap(result);setResultMode(store.settings.mode);setSaved(false);}catch(e){setError((e as Error).message);}finally{setBusy(false);}
+  };
+  const save=()=>{if(!recap||!saveAllowed||saved)return;setStore(s=>({...s,reviews:[...s.reviews,{id:crypto.randomUUID(),at:new Date().toISOString(),messages:lines,recap,mode:resultMode}]}));setSaved(true);notify('这段聊天和复盘已按你的选择保存在当前浏览器。');};
+  const edit=(index:number,patch:Partial<Message>)=>{setLines(a=>a.map((l,i)=>i===index?{...l,...patch}:l));setRecap(undefined);setSaved(false);};
+  return <><PageTitle eyebrow="CHAT REFLECTION" title="回头看，才有新发现" description="把真实发生的事看清楚，再决定继续聊、等待，还是给彼此留空间。"/><Notice><EyeOff size={17}/>粘贴前请隐藏姓名、微信号、电话、住址等信息。真实聊天默认不保存；离开此页即清除未主动保存的文本。{store.settings.mode==='demo'?'当前演示分析在本项目服务端运行，不会转发给外部 AI。':'AI 模式会发送匿名文本给服务端配置的外部 AI 服务，提交前须单独确认。'}</Notice>
+  <div className="review-layout"><section className="panel"><h2>粘贴聊天文本</h2><p className="muted">推荐每行一条：“我：…” 或 “对方：…”。格式不清楚时可以手动标记。</p><label className="sr-only" htmlFor="review-raw">聊天文本</label><textarea id="review-raw" rows={8} value={raw} maxLength={20000} disabled={busy} onChange={e=>setRaw(e.target.value)} placeholder={'我：今天过得怎么样？\n对方：开了一天会，有点累。\n我：听着就累，早点休息。'}/><div className="composer-actions"><small>{raw.length}/20000</small><button className="secondary" onClick={parse} disabled={busy}>解析并标记 <ArrowRight size={15}/></button></div><button className="text-button" onClick={()=>{setLines(l=>[...l,{role:'me',text:''}]);setMarked(false);setRecap(undefined);}} disabled={busy||lines.length>=100}><Plus size={15}/>手动添加一条</button></section><aside className="review-aside"><h3>先看事实，再看可能性</h3><ol><li><strong>实际说了什么</strong><p>基于原句看信息和互动。</p></li><li><strong>哪些还不确定</strong><p>不从一个“嗯”推断心意。</p></li><li><strong>下一步怎么选择</strong><p>包括继续、等待与结束。</p></li></ol><div className="privacy-note"><EyeOff size={20}/><p>默认不写入学习历史。不会自动跨设备同步。</p></div></aside></div>
+  {lines.length>0&&<section className="panel marking-panel"><div className="section-heading"><h2>确认消息归属</h2><span>{lines.length} 条消息</span></div>{unmarked&&<Notice>部分行没有识别到角色，暂显示为“我”。请手动修正后确认，避免分析错位。</Notice>}<div className="marking-list">{lines.map((line,i)=><div className="marking-row" key={i}><select aria-label={`第 ${i+1} 条消息角色`} value={line.role} disabled={busy} onChange={e=>edit(i,{role:e.target.value as Message['role']})}><option value="me">我</option><option value="other">对方</option></select><textarea aria-label={`第 ${i+1} 条消息`} rows={2} value={line.text} maxLength={4000} disabled={busy} onChange={e=>edit(i,{text:e.target.value})}/><button className="icon-button" aria-label={`删除第 ${i+1} 条消息`} disabled={busy} onClick={()=>{setLines(l=>l.filter((_,idx)=>idx!==i));setRecap(undefined);}}><Trash2 size={16}/></button></div>)}</div><label className="checkbox"><input type="checkbox" checked={marked} disabled={busy} onChange={e=>setMarked(e.target.checked)}/>我已确认消息归属，并移除了个人身份信息</label>{store.settings.mode==='ai'&&<label className="checkbox external-consent"><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)} disabled={busy}/>我同意将这段文本发送到服务端配置的外部 AI 服务进行复盘</label>}<div className="composer-actions"><span className="muted tiny">本次不会自动保存</span><button className="primary" onClick={analyze} disabled={busy}>{busy?'正在复盘…':recap?'重新分析':'开始复盘'}<ArrowRight size={16}/></button></div></section>}
+  {error&&<Notice type="error">{error}{lines.length>0&&<button className="text-button" onClick={analyze} disabled={busy}>重试</button>}</Notice>}
+  {recap&&<><RecapView recap={recap} demo={resultMode==='demo'}/><div className="save-review"><label className="checkbox"><input type="checkbox" checked={saveAllowed} disabled={saved} onChange={e=>setSaveAllowed(e.target.checked)}/>我主动选择把原文和复盘保存在当前浏览器</label><button className="secondary" onClick={save} disabled={!saveAllowed||saved}><Save size={16}/>{saved?'已保存':'保存这次复盘'}</button></div></>}
+  </>;
+}
