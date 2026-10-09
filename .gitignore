@@ -8,3 +8,4 @@ test-results/
 *.log
 .runtime/
 __pycache__/
+.portable-build/

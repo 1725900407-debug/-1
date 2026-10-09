@@ -1,55 +1,61 @@
-"""Python 启动器的跨平台选择、下载校验和解压边界测试。"""
+"""Only Python is needed: validate a clean package, occupied port, and secret isolation."""
 import importlib.util
-import io
 from pathlib import Path
+import json
+import shutil
 import socket
-import tarfile
+import subprocess
+import sys
 import tempfile
+import threading
 import unittest
-from unittest.mock import patch
+import urllib.error
+import urllib.request
 
-spec = importlib.util.spec_from_file_location("launcher", Path(__file__).resolve().parents[1] / "start.py")
-launcher = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(launcher)
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+import start as launcher
 
 
 class LauncherTests(unittest.TestCase):
-    def test_mac_intel_apple_and_windows_architecture(self):
-        self.assertEqual(launcher.platform_target("Darwin", "arm64"), "darwin-arm64.tar.gz")
-        self.assertEqual(launcher.platform_target("Darwin", "x86_64"), "darwin-x64.tar.gz")
-        self.assertEqual(launcher.platform_target("Windows", "AMD64"), "win-x64.zip")
-        self.assertEqual(launcher.platform_target("Linux", "aarch64"), "linux-arm64.tar.gz")
-        with self.assertRaises(RuntimeError):
-            launcher.platform_target("UnknownOS", "x86")
-
-    def test_bad_checksum_is_never_used(self):
-        with tempfile.TemporaryDirectory() as directory:
-            target = Path(directory) / "node.tar.gz"
-            with patch.object(launcher.urllib.request, "urlopen", return_value=io.BytesIO(b"bad download")):
-                with self.assertRaisesRegex(RuntimeError, "校验失败"):
-                    launcher.official_download("node.tar.gz", "0" * 64, target)
-            self.assertFalse(target.exists())
-            self.assertFalse(target.with_suffix(".gz.part").exists())
-
-    def test_archive_cannot_escape_destination(self):
-        with tempfile.TemporaryDirectory() as directory:
-            base = Path(directory)
-            archive = base / "archive.tar.gz"
-            with tarfile.open(archive, "w:gz") as target:
-                member = tarfile.TarInfo("../outside.txt")
-                member.size = 4
-                target.addfile(member, io.BytesIO(b"test"))
-            destination = base / "unpacked"
-            destination.mkdir()
-            with self.assertRaisesRegex(RuntimeError, "已停止"):
-                launcher.unpack(archive, destination)
-            self.assertFalse((base / "outside.txt").exists())
+    def test_python_only_clean_directory_with_chinese_and_spaces(self):
+        with tempfile.TemporaryDirectory(prefix="聊天练习 空格-") as directory:
+            target = Path(directory)
+            for name in ("start.py", "python_server.py"):
+                shutil.copy2(ROOT / name, target / name)
+            shutil.copytree(ROOT / "portable", target / "portable")
+            result = subprocess.run([sys.executable, str(target / "start.py"), "--check", "--no-browser"], capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("检查通过", result.stdout)
+            self.assertFalse((target / "node_modules").exists())
+            self.assertFalse((target / ".runtime").exists())
 
     def test_occupied_port_falls_back(self):
-        with socket.socket() as server:
-            server.bind(("127.0.0.1", 0))
-            port = server.getsockname()[1]
-            self.assertNotEqual(launcher.available_port(port), port)
+        with socket.socket() as blocker:
+            blocker.bind(("127.0.0.1", 0))
+            port = blocker.getsockname()[1]
+            server = launcher.start_server(port)
+            try:
+                self.assertNotEqual(server.server_address[1], port)
+            finally:
+                server.server_close()
+
+    def test_only_webpage_and_status_are_exposed(self):
+        server = launcher.start_server(3200)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        local = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        base = "http://127.0.0.1:" + str(server.server_address[1])
+        try:
+            launcher.functional_check(server.server_address[1])
+            for path in ("/.env", "/python_server.py", "/portable/contracts.json", "/../.env"):
+                with self.assertRaises(urllib.error.HTTPError) as error:
+                    local.open(base + path)
+                self.assertEqual(error.exception.code, 404)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
 
 if __name__ == "__main__":

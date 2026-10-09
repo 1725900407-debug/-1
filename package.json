@@ -7,6 +7,10 @@
   "scripts": {
     "dev": "tsx server/index.ts",
     "build": "tsc --noEmit && vite build",
+    "build:portable": "npm run build && tsx scripts/build-portable.ts",
+    "package:portable": "npm run build:portable && python3 scripts/package-portable.py",
+    "test:python": "python3 -m unittest discover -s tests -p '*_test.py' -v",
+    "test:portable": "PORTABLE_TEST=1 playwright test",
     "start": "NODE_ENV=production tsx server/index.ts",
     "test": "tsx --test tests/*.test.ts",
     "test:e2e": "playwright test"

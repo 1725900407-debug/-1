@@ -10,6 +10,7 @@ import Simulation from './Simulation';
 import Review from './Review';
 import { Collection, Progress, SettingsPage } from './Records';
 import { useApp } from './context';
+import { portable } from './api';
 const nav=[{id:'home',label:'今日练习',icon:HomeIcon},{id:'practice',label:'情境练习',icon:MessageSquareText},{id:'simulation',label:'多轮模拟',icon:MessagesSquare},{id:'review',label:'聊天复盘',icon:BookOpen},{id:'collection',label:'错题与收藏',icon:Bookmark},{id:'progress',label:'学习记录',icon:ChartNoAxesCombined},{id:'settings',label:'设置',icon:Settings2}] as const;
 function currentPage():Page{const id=location.hash.slice(1).split('?')[0];return nav.some(n=>n.id===id)?id as Page:'home';}
 export default function App(){
@@ -20,7 +21,7 @@ export default function App(){
   useEffect(()=>{const onHash=()=>{setPage(currentPage());setMenu(false);window.scrollTo({top:0,behavior:'instant'});};window.addEventListener('hashchange',onHash);return()=>window.removeEventListener('hashchange',onHash);},[]);
   useEffect(()=>{if(storageBlocked)return;try{localStorage.setItem(STORAGE_KEY,JSON.stringify(store));}catch{setStorageBlocked(true);setToast('本地保存失败，可能存储空间不足。请导出记录备份。');}},[store,storageBlocked]);
   useEffect(()=>{if(!toast)return;const timer=setTimeout(()=>setToast(''),4500);return()=>clearTimeout(timer);},[toast]);
-  useEffect(()=>{fetch('/api/status').then(async r=>{if(!r.ok)throw Error();const data=await r.json();setAiReady(data.aiConfigured===true);setAccessRequired(data.accessRequired===true);}).catch(()=>setStatusError('无法连接服务端，请确认项目已启动；刷新后可重试。'));},[]);
+  useEffect(()=>{if(portable&&location.protocol==='file:'){setAiReady(false);return;}fetch('./api/status').then(async r=>{if(!r.ok)throw Error();const data=await r.json();setAiReady(data.aiConfigured===true);setAccessRequired(data.accessRequired===true);}).catch(()=>{if(portable)setAiReady(false);else setStatusError('无法连接服务端，请确认项目已启动；刷新后可重试。');});},[]);
   useEffect(()=>{document.documentElement.dataset.motion=store.settings.reducedMotion?'reduced':'normal';},[store.settings.reducedMotion]);
   const go=(p:Page)=>{location.hash=p;if(page===p){setPage(p);setMenu(false);window.scrollTo({top:0,behavior:'instant'});}};
   const openPractice=(id?:string)=>{if(id){setStore(s=>({...s,draft:{scenarioId:id,answer:'',silence:false,hints:0,revised:false,revealed:false}}));}else if(!store.draft||store.draft.savedId){const done=new Set(store.records.map(r=>r.scenarioId));const next=coreScenarios.find(s=>!done.has(s.id))??coreScenarios[0];setStore(s=>({...s,draft:{scenarioId:next.id,answer:'',silence:false,hints:0,revised:false,revealed:false}}));}go('practice');};
@@ -29,6 +30,7 @@ export default function App(){
   {loaded.error&&storageBlocked&&<Notice type="error">{loaded.error}<button className="text-button" onClick={()=>{if(confirm('确认使用新的空记录覆盖异常本地数据？请先到设置导出原始备份。')){setStore(emptyStore());setStorageBlocked(false);}}}>重新启用保存</button></Notice>}
   {!loaded.error&&storageBlocked&&<Notice type="error">浏览器本地保存失败。当前结果只保留在页面内存，刷新可能丢失；请到设置导出备份，清理存储空间后重新导入。</Notice>}
   {statusError&&<Notice type="error">{statusError}</Notice>}
+  {portable&&page==='home'&&<Notice>便携版 · 演示练习在当前浏览器运行，无需联网或安装 Node.js。启用 AI 请运行 python3 start.py 并配置服务端 .env。离线网页与 Python 地址的学习记录分别保存，可在设置导出、导入。</Notice>}
   {page!=='home'&&<div className="mode-banner"><Sparkles size={15}/><span>{store.settings.mode==='demo'?'演示模式 · 内置题目、关键词规则与有限对话分支，不能完整理解自由输入。':'AI 模式 · 输入将通过服务端发送到已配置的外部 AI 服务。'}</span><button onClick={()=>go('settings')}>设置 <ArrowRight size={13}/></button></div>}
   {page==='home'?<Home/>:page==='practice'?<Practice/>:page==='simulation'?<Simulation/>:page==='review'?<Review/>:page==='collection'?<Collection/>:page==='progress'?<Progress/>:<SettingsPage onStorageReset={()=>setStorageBlocked(false)}/>}
   </main><footer><span>慢慢聊，好好说。</span><span>练习比较，不是人格测量 · 不会自动跨设备同步</span></footer></div></div>{toast&&<div className="toast" role="status"><Check size={17}/>{toast}<button onClick={()=>setToast('')} aria-label="关闭提示"><X size={15}/></button></div>}</AppContext.Provider>;

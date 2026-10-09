@@ -35,8 +35,11 @@ test('错题专项迁移、独立完成和两次能力趋势',async({page})=>{
 });
 test('手机完成练习与带头像的聊天，异常结构不进入历史',async({page})=>{
   await page.setViewportSize({width:390,height:844});await page.goto('/');await page.getByRole('button',{name:'开始 10 分钟练习'}).click();
+  if(process.env.PORTABLE_TEST){await page.evaluate(()=>{const s=JSON.parse(localStorage.getItem('chat-practice-room:v1')!);s.settings.mode='ai';s.settings.externalConsent=true;localStorage.setItem('chat-practice-room:v1',JSON.stringify(s));});await page.reload();}
   await page.getByLabel('轮到你了，你会怎么回复？').fill('你好，我是刚才桌游的阿川。');await page.route('**/api/practice',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({data:{summary:'不完整'}})}));await page.getByRole('button',{name:'提交回复',exact:true}).click();await expect(page.getByRole('alert')).toContainText('反馈内容不完整');
-  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('chat-practice-room:v1')!).records.length)).toBe(0);await page.unroute('**/api/practice');await page.getByRole('button',{name:'重试',exact:true}).click();await page.getByRole('button',{name:'直接看完整参考并记录'}).click();await expect(page.getByText('已记入学习记录',{exact:false})).toBeVisible();
+  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('chat-practice-room:v1')!).records.length)).toBe(0);await page.unroute('**/api/practice');
+  if(process.env.PORTABLE_TEST){await page.goto('/#settings');await page.getByRole('button',{name:/本地演示模式/}).click();await page.goto('/#practice');}
+  await page.getByRole('button',{name:process.env.PORTABLE_TEST?'提交回复':'重试',exact:true}).click();await page.getByRole('button',{name:'直接看完整参考并记录'}).click();await expect(page.getByText('已记入学习记录',{exact:false})).toBeVisible();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
   await page.goto('/#simulation');await expect(page.getByRole('img',{name:'林悦的虚构角色头像'})).toBeVisible();await page.getByRole('button',{name:'开始模拟'}).click();await page.getByLabel('你的回复',{exact:true}).fill('你好，我是上次聚会认识的阿川。');await page.getByRole('button',{name:'发送',exact:true}).click();await expect(page.getByRole('button',{name:'对方正在回应…'})).toHaveCount(0);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await page.screenshot({path:'test-results/simulation-mobile.png',fullPage:true});
 });
@@ -50,9 +53,13 @@ test('文本角色标记、事实与推测、默认不保存、主动保存',asy
 });
 test('空输入、网络失败、重试保留输入、AI未配置、超长输入限制',async({page})=>{
   await page.goto('/');await page.getByRole('button',{name:'开始 10 分钟练习'}).click();await page.getByRole('button',{name:'提交回复',exact:true}).click();await expect(page.getByRole('alert')).toContainText('写一句');
+  if(process.env.PORTABLE_TEST){await page.evaluate(()=>{const s=JSON.parse(localStorage.getItem('chat-practice-room:v1')!);s.settings.mode='ai';s.settings.externalConsent=true;localStorage.setItem('chat-practice-room:v1',JSON.stringify(s));});await page.reload();}
   await page.getByLabel('轮到你了，你会怎么回复？').fill('你好，我是刚才桌游活动的阿川。');await page.route('**/api/practice',route=>route.abort());await page.getByRole('button',{name:'提交回复',exact:true}).click();await expect(page.getByRole('alert')).toContainText('网络连接失败');await expect(page.getByLabel('轮到你了，你会怎么回复？')).toHaveValue('你好，我是刚才桌游活动的阿川。');
-  await page.unroute('**/api/practice');await page.getByRole('button',{name:'重试',exact:true}).click();await expect(page.getByText('先自己修改一次')).toBeVisible();
-  await page.goto('/#settings');await page.getByRole('button',{name:/AI 分析模式/}).click();await page.getByLabel('我了解情境输入').check();await page.goto('/#practice');await page.getByRole('button',{name:'第一句话',exact:false}).count();
+  await page.unroute('**/api/practice');
+  if(process.env.PORTABLE_TEST)await page.route('**/api/practice',async route=>{const {demoFeedback}=await import('../../server/demo');const {getScenario}=await import('../../shared/scenarios');await route.fulfill({json:{data:demoFeedback(getScenario('01')!,'你好',false)}});});
+  await page.getByRole('button',{name:'重试',exact:true}).click();await expect(page.getByText('先自己修改一次')).toBeVisible();
+  if(process.env.PORTABLE_TEST)await page.unroute('**/api/practice');
+  await page.goto('/#settings');await page.locator('.mode-choice').getByRole('button',{name:/AI 分析模式/}).click();await page.getByLabel('我了解情境输入').check();await page.goto('/#practice');await page.getByRole('button',{name:'第一句话',exact:false}).count();
   await page.getByRole('button',{name:/把线下的相遇接起来/}).click();await page.getByLabel('轮到你了，你会怎么回复？').fill('你好');await page.getByRole('button',{name:'提交回复',exact:true}).click();await expect(page.getByRole('alert')).toContainText('尚未配置 AI');
   await expect(page.getByLabel('轮到你了，你会怎么回复？')).toHaveAttribute('maxlength','1000');
 });
